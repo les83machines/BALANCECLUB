@@ -110,15 +110,35 @@ const soundToggle=document.getElementById('soundToggle');
 let soundEnabled=true,audioCtx=null;
 const contactSoundIds=new WeakMap();let contactSoundNextId=1,activeContactSounds=new Set(),nextContactSounds=new Set();
 function contactSoundKey(a,b){if(!contactSoundIds.has(a))contactSoundIds.set(a,contactSoundNextId++);if(!contactSoundIds.has(b))contactSoundIds.set(b,contactSoundNextId++);const x=contactSoundIds.get(a),y=contactSoundIds.get(b);return x<y?x+':'+y:y+':'+x;}
+let audioUnlocking=null;
 function unlockAudio(){
- if(!soundEnabled)return;
+ if(!soundEnabled)return Promise.resolve(false);
  if(!audioCtx){
   const AC=window.AudioContext||window.webkitAudioContext;
-  if(!AC)return;
-  audioCtx=new AC();
+  if(!AC)return Promise.resolve(false);
+  try{
+   audioCtx=new AC({latencyHint:'interactive'});
+   audioCtx.addEventListener('statechange',()=>{
+    if(!soundEnabled)return;
+    if(audioCtx.state==='running'){
+     if(!musicStarted)startMusic();
+    }else if(audioCtx.state==='suspended'||audioCtx.state==='interrupted'){
+     stopMusic();
+    }
+   });
+  }catch(err){return Promise.resolve(false);}
  }
- if(audioCtx.state==='suspended')audioCtx.resume().catch(()=>{});
- if(soundEnabled)startMusic();
+ if(audioCtx.state==='running'){
+  if(!musicStarted)startMusic();
+  return Promise.resolve(true);
+ }
+ if(audioUnlocking)return audioUnlocking;
+ audioUnlocking=audioCtx.resume().then(()=>{
+  const ready=audioCtx&&audioCtx.state==='running';
+  if(ready&&soundEnabled&&!musicStarted)startMusic();
+  return ready;
+ }).catch(()=>false).finally(()=>{audioUnlocking=null;});
+ return audioUnlocking;
 }
 function softTone(freq,duration,volume,type='sine',endFreq=freq*.55){
  if(!soundEnabled)return;
@@ -304,10 +324,17 @@ function stopMusic(){
  if(musicTimer){clearInterval(musicTimer);musicTimer=null;}
  musicStarted=false;
 }
+document.addEventListener('visibilitychange',()=>{
+ if(document.visibilityState==='visible'&&soundEnabled&&audioCtx&&audioCtx.state!=='running'){
+  // iOS may suspend Web Audio after backgrounding; the next touch resumes it.
+  const resumeOnTouch=()=>{unlockAudio();document.removeEventListener('pointerdown',resumeOnTouch,true);};
+  document.addEventListener('pointerdown',resumeOnTouch,true);
+ }
+});
 soundToggle.addEventListener('click',()=>{
  soundEnabled=!soundEnabled;soundToggle.textContent='SOUND: '+(soundEnabled?'ON':'OFF');
  soundToggle.setAttribute('aria-pressed',String(soundEnabled));
- if(soundEnabled){unlockAudio();startMusic();playGrab();}
+ if(soundEnabled){unlockAudio().then(ok=>{if(ok&&soundEnabled)playGrab();});}
  else{stopMusic();}
 });
 
