@@ -107,109 +107,76 @@ button,input,select,textarea{font-family:'Montserrat',sans-serif;}
 const canvas=document.getElementById('game'),ctx=canvas.getContext('2d');
 const scoreEl=document.getElementById('score'),balanceEl=document.getElementById('balance'),toast=document.getElementById('toast');
 const soundToggle=document.getElementById('soundToggle');
-let soundEnabled=true,audioCtx=null;
-let audioUnlocking=null,audioNeedsGesture=false;
+let soundEnabled=true,audioCtx=null,audioUnlocking=null,audioNeedsGesture=true;
+let audioStatus='TAP TO ENABLE';
+function setAudioStatus(status){
+ audioStatus=status;
+ soundToggle.title='Audio: '+status+'. Tap SOUND to test.';
+ soundToggle.setAttribute('aria-label','Sound on/off. Audio status: '+status);
+}
 function ensureAudioContext(){
  if(audioCtx)return audioCtx;
  const AC=window.AudioContext||window.webkitAudioContext;
- if(!AC)return null;
+ if(!AC){setAudioStatus('UNAVAILABLE');return null;}
  try{
   audioCtx=new AC();
+  setAudioStatus(audioCtx.state==='running'?'RUNNING':'WAITING FOR TAP');
   audioCtx.addEventListener('statechange',()=>{
    if(!soundEnabled)return;
    if(audioCtx.state==='running'){
-    audioNeedsGesture=false;
-    if(!musicStarted)startMusic();
+    audioNeedsGesture=false;setAudioStatus('RUNNING');
    }else{
-    audioNeedsGesture=true;
-    stopMusic();
+    audioNeedsGesture=true;setAudioStatus(audioCtx.state.toUpperCase());stopMusic();
    }
   });
- }catch(err){audioCtx=null;}
- return audioCtx;
+  return audioCtx;
+ }catch(err){audioCtx=null;setAudioStatus('UNAVAILABLE');return null;}
+}
+function playTestTone(){
+ if(!soundEnabled)return false;
+ const ac=ensureAudioContext();
+ if(!ac||ac.state!=='running')return false;
+ try{
+  const osc=ac.createOscillator(),gain=ac.createGain(),now=ac.currentTime;
+  osc.type='sine';osc.frequency.setValueAtTime(660,now);
+  gain.gain.setValueAtTime(0.0001,now);
+  gain.gain.linearRampToValueAtTime(0.055,now+0.025);
+  gain.gain.linearRampToValueAtTime(0.0001,now+0.22);
+  osc.connect(gain);gain.connect(ac.destination);
+  osc.start(now);osc.stop(now+0.24);return true;
+ }catch(err){setAudioStatus('ERROR');return false;}
 }
 function unlockAudio(){
  if(!soundEnabled)return Promise.resolve(false);
  const ac=ensureAudioContext();
  if(!ac)return Promise.resolve(false);
-
- // iOS Safari can require a source node to be started during the trusted
- // touch/click itself, not merely an asynchronous resume() call.
- try{
-  const buffer=ac.createBuffer(1,1,ac.sampleRate);
-  const source=ac.createBufferSource();
-  const silentGain=ac.createGain();
-  silentGain.gain.value=0;
-  source.buffer=buffer;
-  source.connect(silentGain);silentGain.connect(ac.destination);
-  source.start(0);
- }catch(err){}
-
  if(ac.state==='running'){
-  audioNeedsGesture=false;
+  audioNeedsGesture=false;setAudioStatus('RUNNING');
   if(!musicStarted)startMusic();
   return Promise.resolve(true);
  }
  if(audioUnlocking)return audioUnlocking;
-
- // Call resume immediately while still inside the user gesture handler.
  try{
-  const resumeResult=ac.resume();
-  audioUnlocking=Promise.resolve(resumeResult).then(()=>{
+  audioUnlocking=ac.resume().then(()=>{
    const ready=ac.state==='running';
-   audioNeedsGesture=!ready;
+   audioNeedsGesture=!ready;setAudioStatus(ready?'RUNNING':'WAITING FOR TAP');
    if(ready&&soundEnabled&&!musicStarted)startMusic();
    return ready;
   }).catch(()=>{
-   audioNeedsGesture=true;
-   return false;
+   audioNeedsGesture=true;setAudioStatus('WAITING FOR TAP');return false;
   }).finally(()=>{audioUnlocking=null;});
  }catch(err){
-  audioNeedsGesture=true;
-  return Promise.resolve(false);
+  audioNeedsGesture=true;setAudioStatus('WAITING FOR TAP');return Promise.resolve(false);
  }
  return audioUnlocking;
 }
 function runWhenAudioReady(callback){
  if(!soundEnabled)return;
  const ac=ensureAudioContext();
- if(!ac)return;
- if(ac.state==='running'){callback();return;}
- unlockAudio().then(ready=>{
-  if(ready&&soundEnabled&&audioCtx===ac&&ac.state==='running')callback();
- });
+ if(ac&&ac.state==='running')callback();
 }
 const contactSoundIds=new WeakMap();let contactSoundNextId=1,activeContactSounds=new Set(),nextContactSounds=new Set();
 function contactSoundKey(a,b){if(!contactSoundIds.has(a))contactSoundIds.set(a,contactSoundNextId++);if(!contactSoundIds.has(b))contactSoundIds.set(b,contactSoundNextId++);const x=contactSoundIds.get(a),y=contactSoundIds.get(b);return x<y?x+':'+y:y+':'+x;}
-function unlockAudio(){
- if(!soundEnabled)return Promise.resolve(false);
- if(!audioCtx){
-  const AC=window.AudioContext||window.webkitAudioContext;
-  if(!AC)return Promise.resolve(false);
-  try{
-   audioCtx=new AC({latencyHint:'interactive'});
-   audioCtx.addEventListener('statechange',()=>{
-    if(!soundEnabled)return;
-    if(audioCtx.state==='running'){
-     if(!musicStarted)startMusic();
-    }else if(audioCtx.state==='suspended'||audioCtx.state==='interrupted'){
-     stopMusic();
-    }
-   });
-  }catch(err){return Promise.resolve(false);}
- }
- if(audioCtx.state==='running'){
-  if(!musicStarted)startMusic();
-  return Promise.resolve(true);
- }
- if(audioUnlocking)return audioUnlocking;
- audioUnlocking=audioCtx.resume().then(()=>{
-  const ready=audioCtx&&audioCtx.state==='running';
-  if(ready&&soundEnabled&&!musicStarted)startMusic();
-  return ready;
- }).catch(()=>false).finally(()=>{audioUnlocking=null;});
- return audioUnlocking;
-}
 function softTone(freq,duration,volume,type='sine',endFreq=freq*.55){
  if(!soundEnabled)return;
  runWhenAudioReady(()=>{
@@ -405,8 +372,8 @@ document.addEventListener('visibilitychange',()=>{
   document.addEventListener('pointerdown',resumeOnTouch,true);
  }
 });
-// Safari/iOS: unlock on the earliest trusted touch/click gesture.
-['touchend','pointerup','click','keydown'].forEach(type=>{
+// Safari/iOS: create and resume audio on the earliest trusted gesture.
+['pointerdown','touchstart','mousedown','keydown'].forEach(type=>{
  document.addEventListener(type,()=>{
   if(soundEnabled&&(!audioCtx||audioCtx.state!=='running'))unlockAudio();
  },{capture:true,passive:true});
@@ -414,10 +381,17 @@ document.addEventListener('visibilitychange',()=>{
 soundToggle.addEventListener('click',()=>{
  soundEnabled=!soundEnabled;soundToggle.textContent='SOUND: '+(soundEnabled?'ON':'OFF');
  soundToggle.setAttribute('aria-pressed',String(soundEnabled));
- if(soundEnabled){unlockAudio().then(ok=>{if(ok&&soundEnabled)playGrab();});}
- else{stopMusic();}
+ if(soundEnabled){
+  unlockAudio().then(ok=>{if(ok&&soundEnabled){playTestTone();if(!musicStarted)startMusic();}});
+ }else{stopMusic();setAudioStatus('OFF');}
 });
 
+let audioTestPlayed=false;
+document.addEventListener('pointerdown',()=>{
+ if(!audioTestPlayed&&soundEnabled){
+  unlockAudio().then(ok=>{if(ok&&soundEnabled&&!audioTestPlayed){audioTestPlayed=true;playTestTone();}});
+ }
+},{capture:true,passive:true});
 const exportButton=document.getElementById('export');
 exportButton.addEventListener('click',async()=>{
  const showExportMessage=(message)=>{toast.textContent=message;toast.classList.add('show');setTimeout(()=>toast.classList.remove('show'),1400);};
