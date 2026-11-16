@@ -108,9 +108,79 @@ const canvas=document.getElementById('game'),ctx=canvas.getContext('2d');
 const scoreEl=document.getElementById('score'),balanceEl=document.getElementById('balance'),toast=document.getElementById('toast');
 const soundToggle=document.getElementById('soundToggle');
 let soundEnabled=true,audioCtx=null;
+let audioUnlocking=null,audioNeedsGesture=false;
+function ensureAudioContext(){
+ if(audioCtx)return audioCtx;
+ const AC=window.AudioContext||window.webkitAudioContext;
+ if(!AC)return null;
+ try{
+  audioCtx=new AC();
+  audioCtx.addEventListener('statechange',()=>{
+   if(!soundEnabled)return;
+   if(audioCtx.state==='running'){
+    audioNeedsGesture=false;
+    if(!musicStarted)startMusic();
+   }else{
+    audioNeedsGesture=true;
+    stopMusic();
+   }
+  });
+ }catch(err){audioCtx=null;}
+ return audioCtx;
+}
+function unlockAudio(){
+ if(!soundEnabled)return Promise.resolve(false);
+ const ac=ensureAudioContext();
+ if(!ac)return Promise.resolve(false);
+
+ // iOS Safari can require a source node to be started during the trusted
+ // touch/click itself, not merely an asynchronous resume() call.
+ try{
+  const buffer=ac.createBuffer(1,1,ac.sampleRate);
+  const source=ac.createBufferSource();
+  const silentGain=ac.createGain();
+  silentGain.gain.value=0;
+  source.buffer=buffer;
+  source.connect(silentGain);silentGain.connect(ac.destination);
+  source.start(0);
+ }catch(err){}
+
+ if(ac.state==='running'){
+  audioNeedsGesture=false;
+  if(!musicStarted)startMusic();
+  return Promise.resolve(true);
+ }
+ if(audioUnlocking)return audioUnlocking;
+
+ // Call resume immediately while still inside the user gesture handler.
+ try{
+  const resumeResult=ac.resume();
+  audioUnlocking=Promise.resolve(resumeResult).then(()=>{
+   const ready=ac.state==='running';
+   audioNeedsGesture=!ready;
+   if(ready&&soundEnabled&&!musicStarted)startMusic();
+   return ready;
+  }).catch(()=>{
+   audioNeedsGesture=true;
+   return false;
+  }).finally(()=>{audioUnlocking=null;});
+ }catch(err){
+  audioNeedsGesture=true;
+  return Promise.resolve(false);
+ }
+ return audioUnlocking;
+}
+function runWhenAudioReady(callback){
+ if(!soundEnabled)return;
+ const ac=ensureAudioContext();
+ if(!ac)return;
+ if(ac.state==='running'){callback();return;}
+ unlockAudio().then(ready=>{
+  if(ready&&soundEnabled&&audioCtx===ac&&ac.state==='running')callback();
+ });
+}
 const contactSoundIds=new WeakMap();let contactSoundNextId=1,activeContactSounds=new Set(),nextContactSounds=new Set();
 function contactSoundKey(a,b){if(!contactSoundIds.has(a))contactSoundIds.set(a,contactSoundNextId++);if(!contactSoundIds.has(b))contactSoundIds.set(b,contactSoundNextId++);const x=contactSoundIds.get(a),y=contactSoundIds.get(b);return x<y?x+':'+y:y+':'+x;}
-let audioUnlocking=null;
 function unlockAudio(){
  if(!soundEnabled)return Promise.resolve(false);
  if(!audioCtx){
@@ -142,24 +212,26 @@ function unlockAudio(){
 }
 function softTone(freq,duration,volume,type='sine',endFreq=freq*.55){
  if(!soundEnabled)return;
- unlockAudio();if(!audioCtx)return;
- const now=audioCtx.currentTime,osc=audioCtx.createOscillator(),gain=audioCtx.createGain();
- osc.type=type;osc.frequency.setValueAtTime(freq,now);
- osc.frequency.exponentialRampToValueAtTime(Math.max(25,endFreq),now+duration);
- gain.gain.setValueAtTime(.0001,now);gain.gain.exponentialRampToValueAtTime(Math.max(.0002,volume),now+.008);
- gain.gain.exponentialRampToValueAtTime(.0001,now+duration);
- osc.connect(gain);gain.connect(audioCtx.destination);osc.start(now);osc.stop(now+duration+.015);
+ runWhenAudioReady(()=>{
+  const now=audioCtx.currentTime,osc=audioCtx.createOscillator(),gain=audioCtx.createGain();
+  osc.type=type;osc.frequency.setValueAtTime(freq,now);
+  osc.frequency.exponentialRampToValueAtTime(Math.max(25,endFreq),now+duration);
+  gain.gain.setValueAtTime(.0001,now);gain.gain.exponentialRampToValueAtTime(Math.max(.0002,volume),now+.008);
+  gain.gain.exponentialRampToValueAtTime(.0001,now+duration);
+  osc.connect(gain);gain.connect(audioCtx.destination);osc.start(now);osc.stop(now+duration+.015);
+ });
 }
 function noiseTick(duration,volume,frequency=900){
  if(!soundEnabled)return;
- unlockAudio();if(!audioCtx)return;
- const now=audioCtx.currentTime,n=Math.max(1,Math.floor(audioCtx.sampleRate*duration));
- const buffer=audioCtx.createBuffer(1,n,audioCtx.sampleRate),data=buffer.getChannelData(0);
- for(let i=0;i<n;i++)data[i]=(Math.random()*2-1)*(1-i/n);
- const src=audioCtx.createBufferSource(),filter=audioCtx.createBiquadFilter(),gain=audioCtx.createGain();
- src.buffer=buffer;filter.type='bandpass';filter.frequency.value=frequency;filter.Q.value=.8;
- gain.gain.setValueAtTime(volume,now);gain.gain.exponentialRampToValueAtTime(.0001,now+duration);
- src.connect(filter);filter.connect(gain);gain.connect(audioCtx.destination);src.start(now);src.stop(now+duration);
+ runWhenAudioReady(()=>{
+  const now=audioCtx.currentTime,n=Math.max(1,Math.floor(audioCtx.sampleRate*duration));
+  const buffer=audioCtx.createBuffer(1,n,audioCtx.sampleRate),data=buffer.getChannelData(0);
+  for(let i=0;i<n;i++)data[i]=(Math.random()*2-1)*(1-i/n);
+  const src=audioCtx.createBufferSource(),filter=audioCtx.createBiquadFilter(),gain=audioCtx.createGain();
+  src.buffer=buffer;filter.type='bandpass';filter.frequency.value=frequency;filter.Q.value=.8;
+  gain.gain.setValueAtTime(volume,now);gain.gain.exponentialRampToValueAtTime(.0001,now+duration);
+  src.connect(filter);filter.connect(gain);gain.connect(audioCtx.destination);src.start(now);src.stop(now+duration);
+ });
 }
 // Playful, handmade sound palette: rounded plucks, tiny pitch bends and
 // occasional wooden ticks. It is an original interpretation, not copied audio.
@@ -283,15 +355,17 @@ const musicLooks={
  atlas:{root:277.18,scale:[0,2,4,7,9,10,12],wave:'triangle',bass:'sine',tempo:335,level:.86}
 };
 function musicNote(freq,duration,volume,wave,endFreq){
- if(!soundEnabled||!audioCtx)return;
- const now=audioCtx.currentTime,osc=audioCtx.createOscillator(),gain=audioCtx.createGain();
- osc.type=wave;osc.frequency.setValueAtTime(freq,now);
- if(endFreq)osc.frequency.exponentialRampToValueAtTime(Math.max(30,endFreq),now+duration);
- gain.gain.setValueAtTime(.0001,now);
- gain.gain.linearRampToValueAtTime(volume,now+.018);
- gain.gain.setValueAtTime(volume*.78,now+duration*.55);
- gain.gain.exponentialRampToValueAtTime(.0001,now+duration);
- osc.connect(gain);gain.connect(audioCtx.destination);osc.start(now);osc.stop(now+duration+.02);
+ if(!soundEnabled)return;
+ runWhenAudioReady(()=>{
+  const now=audioCtx.currentTime,osc=audioCtx.createOscillator(),gain=audioCtx.createGain();
+  osc.type=wave;osc.frequency.setValueAtTime(freq,now);
+  if(endFreq)osc.frequency.exponentialRampToValueAtTime(Math.max(30,endFreq),now+duration);
+  gain.gain.setValueAtTime(.0001,now);
+  gain.gain.linearRampToValueAtTime(volume,now+.018);
+  gain.gain.setValueAtTime(volume*.78,now+duration*.55);
+  gain.gain.exponentialRampToValueAtTime(.0001,now+duration);
+  osc.connect(gain);gain.connect(audioCtx.destination);osc.start(now);osc.stop(now+duration+.02);
+ });
 }
 function musicTick(){
  if(!soundEnabled||!audioCtx)return;
@@ -330,6 +404,12 @@ document.addEventListener('visibilitychange',()=>{
   const resumeOnTouch=()=>{unlockAudio();document.removeEventListener('pointerdown',resumeOnTouch,true);};
   document.addEventListener('pointerdown',resumeOnTouch,true);
  }
+});
+// Safari/iOS: unlock on the earliest trusted touch/click gesture.
+['touchend','pointerup','click','keydown'].forEach(type=>{
+ document.addEventListener(type,()=>{
+  if(soundEnabled&&(!audioCtx||audioCtx.state!=='running'))unlockAudio();
+ },{capture:true,passive:true});
 });
 soundToggle.addEventListener('click',()=>{
  soundEnabled=!soundEnabled;soundToggle.textContent='SOUND: '+(soundEnabled?'ON':'OFF');
