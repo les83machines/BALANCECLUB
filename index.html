@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-<title>BALANCE CLUB v194 — responsive contained playfield</title>
+<title>BALANCE CLUB v196 — responsive contained playfield</title>
 <style>
 :root{color-scheme:dark}
 *{box-sizing:border-box}
@@ -312,42 +312,56 @@ soundToggle.addEventListener('click',()=>{
 });
 
 const exportButton=document.getElementById('export');
-exportButton.addEventListener('click',()=>{
+exportButton.addEventListener('click',async()=>{
+ const showExportMessage=(message)=>{toast.textContent=message;toast.classList.add('show');setTimeout(()=>toast.classList.remove('show'),1400);};
  try{
-  const scale=1;
+  // Export at the actual viewport/canvas resolution. The responsive game is
+  // already composed there; rescaling it to the fixed 1440x900 world cropped
+  // or distorted the scene on non-16:10 screens.
   const out=document.createElement('canvas');
-  out.width=Math.round(W*scale);out.height=Math.round(H*scale);
+  out.width=canvas.width;out.height=canvas.height;
   const g=out.getContext('2d');
-  g.drawImage(canvas,0,0,out.width,out.height);
-  const css=(el)=>getComputedStyle(el);
+  if(!g)throw new Error('Could not create export canvas');
+  g.drawImage(canvas,0,0);
+  const dpr=out.width/Math.max(1,canvas.getBoundingClientRect().width);
+  const rect=(el)=>{const r=el.getBoundingClientRect(),c=canvas.getBoundingClientRect();return{x:(r.left-c.left)*dpr,y:(r.top-c.top)*dpr,w:r.width*dpr,h:r.height*dpr};};
+  const style=(el)=>getComputedStyle(el);
+  const drawText=(el,text,x,y,align='left')=>{
+   const st=style(el);g.font=st.font||`${st.fontWeight||400} ${parseFloat(st.fontSize)||12}px ${st.fontFamily||'sans-serif'}`;
+   g.fillStyle=st.color||'#172326';g.textAlign=align;g.textBaseline='top';g.fillText(text,x,y);
+  };
   const brandLogo=document.querySelector('.brand-logo');
-  const score=document.getElementById('score'),balance=document.getElementById('balance');
-  const hint=document.getElementById('hint');
-  const pad=Math.max(18,Math.min(42,W*.03));
-  g.textBaseline='top';
-  if(brandLogo&&brandLogo.complete){
-   const logoW=brandLogo.getBoundingClientRect().width;
-   const logoH=logoW*(brandLogo.naturalHeight/brandLogo.naturalWidth);
-   g.drawImage(brandLogo,pad,pad,logoW,logoH);
+  if(brandLogo&&brandLogo.complete&&brandLogo.naturalWidth){
+   const r=rect(brandLogo);g.drawImage(brandLogo,r.x,r.y,r.w,r.h);
   }
-  g.textAlign='right';
   const stats=document.querySelector('.stats');
-  let right=W-pad;
-  for(const stat of [...stats.children].reverse()){
-   const small=stat.querySelector('small'),strong=stat.querySelector('strong');
-   g.fillStyle=css(small).color;g.font=font(small);g.fillText(small.textContent,right,pad);
-   g.fillStyle=css(strong).color;g.font=font(strong);g.fillText(strong.textContent,right,pad+17);
-   right-=Math.max(95,g.measureText(strong.textContent).width+55);
+  if(stats){
+   for(const stat of stats.children){
+    const small=stat.querySelector('small'),strong=stat.querySelector('strong');
+    if(small&&strong){const sr=rect(small),br=rect(strong);drawText(small,small.textContent,sr.x+sr.w,sr.y,'right');drawText(strong,strong.textContent,br.x+br.w,br.y,'right');}
+   }
   }
-  g.textAlign='left';g.fillStyle=css(hint).color;g.font=font(hint);
-  const lines=hint.innerText.split('\n');lines.forEach((line,i)=>g.fillText(line,pad,H-pad-34+i*16));
-  const a=document.createElement('a');
-  a.download='balance-club-'+new Date().toISOString().slice(0,10)+'.jpg';
-  a.href=out.toDataURL('image/jpeg',.94);a.click();
-  toast.textContent='JPG EXPORTED';toast.classList.add('show');setTimeout(()=>toast.classList.remove('show'),1100);
- }catch(err){
-  toast.textContent='EXPORT FAILED';toast.classList.add('show');setTimeout(()=>toast.classList.remove('show'),1400);
- }
+  const hint=document.getElementById('hint');
+  if(hint&&style(hint).display!=='none'){
+   const r=rect(hint),st=style(hint);g.font=st.font||`400 ${parseFloat(st.fontSize)||10}px ${st.fontFamily||'sans-serif'}`;g.fillStyle=st.color||'#a5acad';g.textAlign='left';g.textBaseline='top';
+   const lines=(hint.innerText||hint.textContent||'').split('\n');const lineHeight=parseFloat(st.lineHeight)||16;
+   lines.forEach((line,i)=>g.fillText(line,r.x,r.y+i*lineHeight*dpr));
+  }
+  // Include the bottom controls in the JPG, matching the visible interface.
+  const controls=document.querySelector('.controls');
+  if(controls&&style(controls).display!=='none'){
+   for(const button of controls.querySelectorAll('button')){
+    const r=rect(button),st=style(button);g.fillStyle=st.backgroundColor||'#111c1e';g.strokeStyle=st.borderColor||'#354143';g.lineWidth=Math.max(1,dpr);
+    const radius=3*dpr;g.beginPath();g.roundRect(r.x,r.y,r.w,r.h,radius);g.fill();g.stroke();
+    g.font=st.font||`400 ${parseFloat(st.fontSize)||10}px ${st.fontFamily||'sans-serif'}`;g.fillStyle=st.color||'#d9dedb';g.textAlign='center';g.textBaseline='middle';g.fillText(button.textContent.trim(),r.x+r.w/2,r.y+r.h/2);
+   }
+  }
+  const blob=await new Promise((resolve,reject)=>out.toBlob(b=>b?resolve(b):reject(new Error('JPG encoding failed')),'image/jpeg',.94));
+  const url=URL.createObjectURL(blob),a=document.createElement('a');
+  a.download='balance-club-'+new Date().toISOString().slice(0,10)+'.jpg';a.href=url;a.style.display='none';document.body.appendChild(a);a.click();a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url),2000);
+  showExportMessage('JPG EXPORTED');
+ }catch(err){console.error('BALANCE CLUB JPG export failed:',err);showExportMessage('EXPORT FAILED');}
 });
 
 let visualLook='original';
