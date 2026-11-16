@@ -1106,45 +1106,49 @@ function draw(){
  ctx.translate(-W*.5,-STONE_ANCHOR_Y);
  for(const s of stones)drawStone(s);
  ctx.restore();
- // Calm pond water with a more readable, softly undulating surface.
+ // Calm pond water is rendered in viewport space, not world space. This lets
+ // the water surface run edge-to-edge and fill the full lower viewport even
+ // when the contained 16:10 playfield leaves side or bottom margins.
  ctx.save();
+ ctx.setTransform(DPR,0,0,DPR,0,0);
+ const viewW=canvas.width/DPR,viewH=canvas.height/DPR;
+ const screenSurfaceY=VIEW_Y+surfaceY*VIEW_SCALE;
  if(visualLook==='lunar'){
-  const waterGrad=ctx.createLinearGradient(0,surfaceY,0,H);
+  const waterGrad=ctx.createLinearGradient(0,screenSurfaceY,0,viewH);
   waterGrad.addColorStop(0,'#c9baff');waterGrad.addColorStop(.45,'#a99af0');waterGrad.addColorStop(1,'#8173d8');
-  ctx.fillStyle=waterGrad;ctx.fillRect(0,surfaceY,W,H-surfaceY);
+  ctx.fillStyle=waterGrad;ctx.fillRect(0,screenSurfaceY,viewW,viewH-screenSurfaceY);
   ctx.strokeStyle='rgba(255,255,255,.96)';ctx.lineWidth=2.2;
  }else if(visualLook==='cobalt'){
-  const waterGrad=ctx.createLinearGradient(0,surfaceY,0,H);
+  const waterGrad=ctx.createLinearGradient(0,screenSurfaceY,0,viewH);
   waterGrad.addColorStop(0,'#347bd0');waterGrad.addColorStop(.5,'#15539e');waterGrad.addColorStop(1,'#0a2c58');
-  ctx.fillStyle=waterGrad;ctx.fillRect(0,surfaceY,W,H-surfaceY);
+  ctx.fillStyle=waterGrad;ctx.fillRect(0,screenSurfaceY,viewW,viewH-screenSurfaceY);
   ctx.strokeStyle='rgba(205,229,255,.9)';ctx.lineWidth=1.5;
  }else if(visualLook==='terra'){
-  const waterGrad=ctx.createLinearGradient(0,surfaceY,0,H);
+  const waterGrad=ctx.createLinearGradient(0,screenSurfaceY,0,viewH);
   waterGrad.addColorStop(0,'#8a7651');waterGrad.addColorStop(.48,'#596044');waterGrad.addColorStop(1,'#343d2c');
-  ctx.fillStyle=waterGrad;ctx.fillRect(0,surfaceY,W,H-surfaceY);
+  ctx.fillStyle=waterGrad;ctx.fillRect(0,screenSurfaceY,viewW,viewH-screenSurfaceY);
   ctx.strokeStyle='rgba(248,231,201,.88)';ctx.lineWidth=1.5;
  }else if(visualLook==='atlas'){
-  const waterGrad=ctx.createLinearGradient(0,surfaceY,0,H);
+  const waterGrad=ctx.createLinearGradient(0,screenSurfaceY,0,viewH);
   waterGrad.addColorStop(0,'#647d91');waterGrad.addColorStop(.52,'#405768');waterGrad.addColorStop(1,'#263944');
-  ctx.fillStyle=waterGrad;ctx.fillRect(0,surfaceY,W,H-surfaceY);
+  ctx.fillStyle=waterGrad;ctx.fillRect(0,screenSurfaceY,viewW,viewH-screenSurfaceY);
   ctx.strokeStyle='rgba(226,232,224,.82)';ctx.lineWidth=1.5;
  }else{
-  ctx.fillStyle='#0176AC';ctx.fillRect(0,surfaceY,W,H-surfaceY);
+  ctx.fillStyle='#0176AC';ctx.fillRect(0,screenSurfaceY,viewW,viewH-screenSurfaceY);
   ctx.strokeStyle='rgba(250,225,194,0.82)';ctx.lineWidth=1.5;
  }
  const waterTime=performance.now()*.00045;
- // A soft luminous edge where the pond meets the foundation stones.
  ctx.beginPath();
- for(let x=0;x<=W;x+=5){const y=surfaceY+Math.sin(x*.009+waterTime*1.25)*2.1+Math.sin(x*.019-waterTime*.8)*.8;if(x===0)ctx.moveTo(x,y);else ctx.lineTo(x,y);}
+ for(let x=0;x<=viewW;x+=5){const y=screenSurfaceY+Math.sin(x*.009+waterTime*1.25)*2.1+Math.sin(x*.019-waterTime*.8)*.8;if(x===0)ctx.moveTo(x,y);else ctx.lineTo(x,y);}
  ctx.shadowColor='rgba(255,255,255,.75)';ctx.shadowBlur=9;
  ctx.strokeStyle=visualLook==='lunar'?'rgba(255,255,255,.98)':visualLook==='cobalt'?'rgba(220,238,255,.9)':visualLook==='terra'?'rgba(248,231,201,.88)':visualLook==='atlas'?'rgba(229,219,194,.82)':'rgba(250,225,194,0.82)';ctx.lineWidth=visualLook==='lunar'?2.4:1.5;ctx.stroke();ctx.shadowBlur=0;
  if(visualLook==='lunar'){
-  ctx.beginPath();for(let x=0;x<=W;x+=6){const y=surfaceY+4+Math.sin(x*.011-waterTime*1.5)*1.7;if(x===0)ctx.moveTo(x,y);else ctx.lineTo(x,y);}ctx.strokeStyle='rgba(255,255,255,.48)';ctx.lineWidth=1.2;ctx.stroke();
+  ctx.beginPath();for(let x=0;x<=viewW;x+=6){const y=screenSurfaceY+4+Math.sin(x*.011-waterTime*1.5)*1.7;if(x===0)ctx.moveTo(x,y);else ctx.lineTo(x,y);}ctx.strokeStyle='rgba(255,255,255,.48)';ctx.lineWidth=1.2;ctx.stroke();
  }
  ctx.strokeStyle=visualLook==='lunar'?'rgba(255,255,255,.48)':visualLook==='cobalt'?'rgba(220,238,255,.28)':visualLook==='terra'?'rgba(248,231,201,.28)':visualLook==='atlas'?'rgba(229,219,194,.26)':'rgba(250,225,194,0.28)';ctx.lineWidth=visualLook==='lunar'?1.35:1;
  for(let i=0;i<8;i++){
-  const yy=surfaceY+17+i*14;ctx.beginPath();
-  for(let x=0;x<=W;x+=8){const waveY=yy+Math.sin(x*.012+waterTime*1.35+i*.72)*2.15+Math.sin(x*.024-waterTime*.8+i*1.3)*.85;if(x===0)ctx.moveTo(x,waveY);else ctx.lineTo(x,waveY);}
+  const yy=screenSurfaceY+17+i*14;ctx.beginPath();
+  for(let x=0;x<=viewW;x+=8){const waveY=yy+Math.sin(x*.012+waterTime*1.35+i*.72)*2.15+Math.sin(x*.024-waterTime*.8+i*1.3)*.85;if(x===0)ctx.moveTo(x,waveY);else ctx.lineTo(x,waveY);}
   ctx.stroke();
  }
  ctx.restore();
